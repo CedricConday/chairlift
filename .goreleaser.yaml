@@ -142,6 +142,30 @@ nfpms:
     license: GPL-3.0-or-later
     conflicts:
       - projectbluefin-chairlift-system-integration
+    # Mandatory runtime dependencies. The binaries are built with
+    # CGO_ENABLED=0 and link nothing, so no format's automatic shared-library
+    # dependency scan can see them: puregotk dlopens "libgtk-4.so.1" and
+    # "libadwaita-1.so.0" at runtime, and the packaged desktop entry always
+    # launches /usr/bin/chairlift-wrapper, whose interpreter is /bin/bash.
+    # Without these, a minimal image installs the package successfully and
+    # then fails at launch. Names differ per distro family, so each format
+    # that uses different ones overrides the list (nFPM replaces the
+    # top-level list for an overridden format, it does not merge).
+    dependencies:
+      - bash
+      - gtk4
+      - libadwaita
+    overrides:
+      deb:
+        dependencies:
+          - bash
+          - libgtk-4-1
+          - libadwaita-1-0
+      apk:
+        dependencies:
+          - bash
+          - gtk4.0
+          - libadwaita
     contents:
       # Wrapper script
       - src: ./data/chairlift-wrapper.sh

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -277,5 +278,123 @@ func TestGoreleaserReleaseFooterHasCanonicalRepoURL(t *testing.T) {
 	}
 	if strings.Contains(line, ".ProjectName") {
 		t.Errorf("Full Changelog line = %q, want no .ProjectName: the repository URL already ends in the repository name, so the two must not be concatenated", line)
+	}
+}
+
+// guiBuildID is the .goreleaser.yaml builds[] id of the GTK application
+// binary, and wrapperSrcSuffix the source path of the Bash launcher the
+// packaged desktop entry's Exec= line runs. A package selecting the first or
+// shipping the second is a package that cannot start without GTK 4,
+// libadwaita 1, and Bash present on the target system.
+const (
+	guiBuildID       = "chairlift"
+	wrapperSrcSuffix = "chairlift-wrapper.sh"
+	desktopSrcSuffix = "io.projectbluefin.chairlift.desktop"
+)
+
+// wantRuntimeDependencies are the mandatory runtime dependencies every
+// GUI-shipping nfpms[] entry must declare, with the package name each output
+// format's distro family uses for them.
+//
+// None of these is discoverable by nFPM's automatic dependency scanning: the
+// binaries are built with CGO_ENABLED=0 and link nothing, puregotk resolves
+// GTK and libadwaita with dlopen at runtime (core.SetSharedLibraries names
+// "libgtk-4.so.1" and "libadwaita-1.so.0"), and the Bash requirement comes
+// from the packaged wrapper's interpreter line, not from linkage. An
+// undeclared dependency therefore does not fail the build or the package —
+// it installs cleanly on a minimal image and fails at launch, which is the
+// regression this test exists to catch.
+var wantRuntimeDependencies = []struct {
+	what     string
+	byFormat map[string]string
+}{
+	{
+		what:     "Bash, the interpreter of the wrapper the desktop entry execs",
+		byFormat: map[string]string{"deb": "bash", "rpm": "bash", "apk": "bash"},
+	},
+	{
+		what:     `GTK 4, dlopened as "libgtk-4.so.1"`,
+		byFormat: map[string]string{"deb": "libgtk-4-1", "rpm": "gtk4", "apk": "gtk4.0"},
+	},
+	{
+		what:     `libadwaita 1, dlopened as "libadwaita-1.so.0"`,
+		byFormat: map[string]string{"deb": "libadwaita-1-0", "rpm": "libadwaita", "apk": "libadwaita"},
+	},
+}
+
+// nfpmShipsGUI reports whether an nfpms[] entry ships the GTK application:
+// either by selecting its build id, or by installing the wrapper or desktop
+// entry that launches it. It is derived from the parsed config rather than
+// from a package-name literal so that a renamed or newly added GUI package
+// is covered by TestGoreleaserNfpmDeclaresRuntimeDependencies automatically.
+func nfpmShipsGUI(nfpm NfpmConfig) bool {
+	for _, id := range nfpm.IDs {
+		if id == guiBuildID {
+			return true
+		}
+	}
+	for _, c := range nfpm.Contents {
+		if strings.HasSuffix(c.Src, wrapperSrcSuffix) || strings.HasSuffix(c.Src, desktopSrcSuffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestGoreleaserNfpmDeclaresRuntimeDependencies parses the real, repo-root
+// .goreleaser.yaml and asserts every GUI-shipping nfpms[] entry declares its
+// mandatory runtime dependencies for every format it builds, under that
+// format's own distro-family package names.
+//
+// It iterates every nfpms[] entry and every entry's formats[] rather than
+// checking nfpms[0] and "deb" — per
+// docs/skills/collection-regressions/SKILL.md, a consistency check that
+// special-cases one member stops protecting anything as soon as a second one
+// is added. A GUI package that builds a format with no known package names
+// is a t.Fatal, not a skip: a new output format needs its names added here
+// deliberately, not inherited silently from the top-level list.
+//
+// Non-GUI packages (the root-owned system-integration companion, which ships
+// only the privileged helpers and their PolicyKit policies) are exempt and
+// recorded as such, so the test does not quietly pass by matching nothing.
+func TestGoreleaserNfpmDeclaresRuntimeDependencies(t *testing.T) {
+	cfg := loadGoreleaserConfig(t)
+	if len(cfg.Nfpms) == 0 {
+		t.Fatal(".goreleaser.yaml has no nfpms entries")
+	}
+
+	guiPackages := 0
+	for i, nfpm := range cfg.Nfpms {
+		if !nfpmShipsGUI(nfpm) {
+			continue
+		}
+		guiPackages++
+
+		t.Run(fmt.Sprintf("nfpms[%d]/%s", i, nfpm.PackageName), func(t *testing.T) {
+			if len(nfpm.Formats) == 0 {
+				t.Fatalf("%s declares no formats", nfpm.PackageName)
+			}
+			for _, format := range nfpm.Formats {
+				t.Run(format, func(t *testing.T) {
+					deps := nfpm.DependenciesFor(format)
+					if len(deps) == 0 {
+						t.Fatalf("%s declares no runtime dependencies for %s; a minimal target installs it and then cannot launch", nfpm.PackageName, format)
+					}
+					for _, want := range wantRuntimeDependencies {
+						pkg, ok := want.byFormat[format]
+						if !ok {
+							t.Fatalf("no %s package name known for %s; add one to wantRuntimeDependencies rather than letting the format inherit another family's names", format, want.what)
+						}
+						if !slices.Contains(deps, pkg) {
+							t.Errorf("%s dependencies for %s = %v, want it to contain %q (%s)", nfpm.PackageName, format, deps, pkg, want.what)
+						}
+					}
+				})
+			}
+		})
+	}
+
+	if guiPackages == 0 {
+		t.Fatal("no nfpms[] entry ships the GTK application; this test would pass vacuously")
 	}
 }

@@ -53,16 +53,38 @@ type ReleaseConfig struct {
 }
 
 // NfpmConfig is the subset of an nfpms[] entry relevant to package identity,
-// build selection, conflicts, install locations, and license consistency.
+// build selection, conflicts, install locations, license consistency, and the
+// runtime dependencies the generated packages declare.
 type NfpmConfig struct {
-	ID          string        `yaml:"id"`
-	PackageName string        `yaml:"package_name"`
-	IDs         []string      `yaml:"ids"`
-	Bindir      string        `yaml:"bindir"`
-	License     string        `yaml:"license"`
-	Conflicts   []string      `yaml:"conflicts"`
-	Contents    []NfpmContent `yaml:"contents"`
-	Formats     []string      `yaml:"formats"`
+	ID           string                  `yaml:"id"`
+	PackageName  string                  `yaml:"package_name"`
+	IDs          []string                `yaml:"ids"`
+	Bindir       string                  `yaml:"bindir"`
+	License      string                  `yaml:"license"`
+	Conflicts    []string                `yaml:"conflicts"`
+	Contents     []NfpmContent           `yaml:"contents"`
+	Formats      []string                `yaml:"formats"`
+	Dependencies []string                `yaml:"dependencies"`
+	Overrides    map[string]NfpmOverride `yaml:"overrides"`
+}
+
+// NfpmOverride is the subset of an nfpms[].overrides.<format> block the
+// dependency tests read. nFPM replaces — it does not merge — the top-level
+// field for a format that overrides it, so DependenciesFor below resolves a
+// format to exactly one list the same way nfpm does.
+type NfpmOverride struct {
+	Dependencies []string `yaml:"dependencies"`
+}
+
+// DependenciesFor returns the runtime dependencies the package declares for
+// one output format, following nFPM's override semantics: an overrides.<format>
+// dependencies list replaces the top-level list entirely, and a format with no
+// override inherits it.
+func (n NfpmConfig) DependenciesFor(format string) []string {
+	if override, ok := n.Overrides[format]; ok && override.Dependencies != nil {
+		return override.Dependencies
+	}
+	return n.Dependencies
 }
 
 // NfpmContent is one nfpm contents[] entry's source/destination pair.

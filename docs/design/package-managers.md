@@ -921,6 +921,29 @@ installed layout itself:
   mutual conflicts, unique IDs, and the integration package's exact four
   content mappings. This prevents the companion from accidentally acquiring
   the GUI binary or losing one of the root-owned integration files.
+- **`TestGoreleaserNfpmDeclaresRuntimeDependencies`** asserts every
+  GUI-shipping `nfpms[]` entry declares its mandatory runtime dependencies
+  for **every** format it builds, under that format's own distro-family
+  package names (`bash`, `libgtk-4-1`, `libadwaita-1-0` for deb; `bash`,
+  `gtk4`, `libadwaita` for rpm; `bash`, `gtk4.0`, `libadwaita` for apk).
+  None of the three is discoverable by nFPM's automatic dependency scanning:
+  the binaries are built `CGO_ENABLED=0` and link nothing, puregotk resolves
+  GTK and libadwaita with `dlopen` (`core.SetSharedLibraries` names
+  `libgtk-4.so.1` and `libadwaita-1.so.0`), and the Bash requirement comes
+  from the packaged wrapper's interpreter line rather than from linkage — so
+  an undeclared dependency produces a package that installs cleanly on a
+  minimal image and then fails at launch. Which entries are in scope is
+  derived from the parsed config (a build id of `chairlift`, or a
+  `contents[]` entry shipping the wrapper or desktop file), not from a
+  package-name literal, so a renamed or newly added GUI package is covered
+  automatically; a GUI package building a format with no names recorded in
+  the test is a `t.Fatal`, and an nfpms block with no GUI package at all
+  fails rather than passing vacuously. `NfpmConfig.Dependencies`,
+  `NfpmConfig.Overrides`, and `NfpmConfig.DependenciesFor`
+  (`internal/installcheck/installcheck.go`) exist to give `yaml.Unmarshal`
+  somewhere to put the lists and to resolve a format the way nFPM does —
+  an `overrides.<format>.dependencies` list replaces the top-level list for
+  that format rather than merging with it.
 
 Both tests fail — not skip — if `internal/updex.HelperPath`, the Makefile's
 `PREFIX` default, or `.goreleaser.yaml`'s `nfpms` block change independently

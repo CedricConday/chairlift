@@ -196,7 +196,11 @@ Other useful targets: `make dev` (CGO-enabled build with `-race` for development
 ### Dependencies
 
 - Go (see `go.mod` for the toolchain version)
-- GTK 4 and libadwaita 1 (shared libraries, loaded at runtime by puregotk — no GTK dev headers or CGO needed to build)
+- GTK 4 and libadwaita 1 (shared libraries, loaded at runtime by puregotk — no GTK dev headers or CGO needed to build).
+  The generated deb/rpm/apk packages declare them, plus Bash for the installed
+  `chairlift-wrapper` launcher, under each distro family's own package names
+  (`libgtk-4-1`/`libadwaita-1-0`, `gtk4`/`libadwaita`, `gtk4.0`/`libadwaita`),
+  so a minimal target fails at install time rather than at first launch.
 - Homebrew (optional, for package management features and tap trust)
 - Flatpak (optional)
 - `bootc` and the snow `/usr/libexec/bootc-update-stage` script (optional; enables staged system updates on bootc installs)
